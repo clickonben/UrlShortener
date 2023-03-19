@@ -1,13 +1,12 @@
 require('dotenv').config();
-var express = require('express');
-var app = express();
-const https = require('https');
-const fs = require('fs');
+const express = require('express');
+const app = express();
 const cors = require('cors');
 const dns = require('node:dns');
 const util = require('util');
-let bodyParser = require('body-parser');
-mongoose = require("mongoose");
+const bodyParser = require('body-parser');
+const mongoose = require("mongoose");
+const { subHours } = require('date-fns');
 
 const dnsLookup = util.promisify(dns.lookup);
 
@@ -24,6 +23,10 @@ const UrlMapSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true
+  },
+  dateAdded: {
+    type: Date,
+    required: true
   }
 });
 
@@ -45,24 +48,36 @@ app.post('/api/shorturl', async (req, res) => {
     await dnsLookup(url.hostname);
     let urlMap = await UrlMap.findOne({baseUrl: url});
     if (urlMap === null) {
-      urlMap = new UrlMap ({ baseUrl: req.body.url })
+      urlMap = new UrlMap ({ baseUrl: req.body.url, dateAdded: new Date() })
       await urlMap.save();
     }
     res.json({ original_url: urlMap.baseUrl, short_url: urlMap.id});      
   } catch (error) {
+    console.error(error);
     res.json({ error: 'invalid url' });
   } 
 });
 app.get('/api/shorturl/:id', async (req, res) => {
-  let urlMap = await UrlMap.findById(req.params.id);
-  res.redirect(urlMap.baseUrl);
+  try {
+    let urlMap = await UrlMap.findById(req.params.id);
+    res.redirect(urlMap.baseUrl);  
+  } catch (error) {
+    console.error(error);    
+    res.sendStatus(500,"Server error.")
+  }
+  
 });
 
-const options = {
-  key: fs.readFileSync(process.env.SSL_KEY_PATH),
-  cert: fs.readFileSync(process.env.SSL_CERT_PATH)
-}
+(async () => {
+  try {
+    await UrlMap.deleteMany({dateAdded:subHours(Date(), 3)})
+  } catch (error) {
+    console.error(error);
+  }
+})
 
-const PORT = process.env.PORT || 443
-const listener = https.createServer(options, app).listen(PORT, console.log(`Node.js listening on port  ${PORT}`))
+const listener = app.listen(process.env.PORT || 3000, () => {
+  console.log('Your app is listening on port ' + listener.address().port)
+})
+
 
